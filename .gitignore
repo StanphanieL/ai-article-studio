@@ -1,0 +1,77 @@
+# ===========================
+# 环境配置 / Secrets
+# ===========================
+.env
+.env.*
+!.env.example
+*.local
+
+# ===========================
+# Java / Maven
+# ===========================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+
+# ===========================
+# Spring Boot
+# ===========================
+backend/uploads/
+backend/logs/
+logs/
+*.log
+*.log.*
+
+# ===========================
+# Node / Frontend
+# ===========================
+node_modules/
+dist/
+dist-ssr/
+.cache/
+.parcel-cache/
+.vite/
+
+# ===========================
+# IDE / Editor
+# ===========================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===========================
+# 部署相关
+# ===========================
+deploy/*.env
+deploy/**/.env
+
+# ===========================
+# 其他敏感配置
+# ===========================
+application-local.yml
+application-local.properties
+application-prod.yml
+application-prod.properties
+*.pem
+*.key
+*.cert
+*.p12
+*.jks

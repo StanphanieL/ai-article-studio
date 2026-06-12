@@ -1,0 +1,55 @@
+server:
+  port: 8123
+
+spring:
+  application:
+    name: ai-article-studio
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:13306/ai_article_studio?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: 123456
+
+  data:
+    redis:
+      host: localhost
+      port: 16379
+
+mybatis:
+  mapper-locations: classpath*:mapper/*.xml
+  type-aliases-package: com.nana.aiarticlestudio.model.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+
+llm:
+  mode: real
+  base-url: https://api.minimax.chat
+  api-key: ${LLM_API_KEY:}
+  model: MiniMax-M2.5
+  timeout-seconds: 360
+
+app:
+  backend-base-url: http://localhost:8123
+
+  pexels:
+    api-key: ${PEXELS_API_KEY}
+
+  google:
+    api-key: ${GOOGLE_AI_API_KEY}
+    image-model: gemini-2.5-flash-image
+
+  siliconflow:
+    api-key: ${SILICONFLOW_API_KEY:}
+    base-url: https://api.siliconflow.cn/v1
+    image-model: Kwai-Kolors/Kolors
+    image-size: 1024x1024
+    batch-size: 1
+    num-inference-steps: 20
+    guidance-scale: 7.5
+    negative-prompt: low quality, blurry, distorted, deformed, watermark, text artifacts
+
+
+  image:
+    local-dir: uploads/images
