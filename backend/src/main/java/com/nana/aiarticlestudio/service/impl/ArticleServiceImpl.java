@@ -703,17 +703,37 @@ public class ArticleServiceImpl implements ArticleService {
                 throw new RuntimeException("请先生成正文");
             }
 
+            /*
+             * 根据正文标题数量和文章长度，
+             * 自动计算本次需要多少张图片。
+             */
+            int imageCount =
+                    imagePromptAgent.calculateImageCount(
+                            article.getContent()
+                    );
+
+            System.out.println(
+                    "本次计划生成图片数量："
+                            + imageCount
+            );
+
             prompt = imagePromptAgent.buildPrompt(
                     article.getTopic(),
                     article.getSelectedTitle(),
                     article.getOutline(),
                     article.getContent(),
-                    article.getStyle()
+                    article.getStyle(),
+                    imageCount
             );
 
-            response = imagePromptAgent.callRaw(prompt);
+            response =
+                    imagePromptAgent.callRaw(prompt);
 
-            List<ImagePromptOption> imagePrompts = imagePromptAgent.parse(response);
+            List<ImagePromptOption> imagePrompts =
+                    imagePromptAgent.parse(
+                            response,
+                            imageCount
+                    );
             String imagePromptsJson = objectMapper.writeValueAsString(imagePrompts);
 
             int result = articleMapper.updateImagePrompts(

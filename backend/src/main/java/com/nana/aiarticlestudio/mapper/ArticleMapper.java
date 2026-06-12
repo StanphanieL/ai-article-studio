@@ -139,6 +139,8 @@ public interface ArticleMapper {
     @Update("""
         UPDATE article
         SET image_prompts = #{imagePrompts},
+            image_results = NULL,
+            final_markdown = NULL,
             phase = #{phase},
             status = #{status},
             error_message = NULL
@@ -153,6 +155,7 @@ public interface ArticleMapper {
     @Update("""
         UPDATE article
         SET image_results = #{imageResults},
+            final_markdown = NULL,
             phase = #{phase},
             status = #{status},
             error_message = NULL
