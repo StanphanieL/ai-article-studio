@@ -48,6 +48,11 @@ import com.nana.aiarticlestudio.model.vo.ImageResultOption;
 
 import com.nana.aiarticlestudio.agent.ArticleComposeAgent;
 
+import com.nana.aiarticlestudio.model.dto.ArticleModelConfig;
+import com.nana.aiarticlestudio.model.dto.LlmRequestOptions;
+import com.nana.aiarticlestudio.model.dto.SaveModelConfigRequest;
+import com.nana.aiarticlestudio.service.ArticleModelConfigService;
+
 @Service
 @RequiredArgsConstructor
 public class ArticleServiceImpl implements ArticleService {
@@ -72,6 +77,8 @@ public class ArticleServiceImpl implements ArticleService {
 
     private final ArticleComposeAgent articleComposeAgent;
 
+    private final ArticleModelConfigService articleModelConfigService;
+
     private void sendSse(SseEmitter emitter, String eventName, SseMessage message) throws IOException {
         emitter.send(SseEmitter.event()
                 .name(eventName)
@@ -86,34 +93,159 @@ public class ArticleServiceImpl implements ArticleService {
         }
     }
 
+    private ArticleModelConfig resolveModelConfig(
+            Article article
+    ) {
+        return articleModelConfigService.resolve(
+                article.getModelConfig()
+        );
+    }
+
+    private LlmRequestOptions resolveLlmOptions(
+            ArticleModelConfig config
+    ) {
+        return articleModelConfigService
+                .toLlmOptions(config);
+    }
+
+    private String buildAgentInput(
+            ArticleModelConfig config,
+            String prompt
+    ) {
+        return "modelConfig="
+                + articleModelConfigService
+                .toJson(config)
+                + "\n\nprompt=\n"
+                + prompt;
+    }
+
     @Override
-    public String createArticle(ArticleCreateRequest request) {
+    public String createArticle(
+            ArticleCreateRequest request
+    ) {
         Article article = new Article();
 
-        String taskId = UUID.randomUUID().toString().replace("-", "");
-        String style = StringUtils.hasText(request.getStyle()) ? request.getStyle() : "TECH";
+        String taskId =
+                UUID.randomUUID()
+                        .toString()
+                        .replace("-", "");
+
+        String style =
+                StringUtils.hasText(
+                        request.getStyle()
+                )
+                        ? request.getStyle()
+                        : "TECH";
+
+        ArticleModelConfig defaultConfig =
+                articleModelConfigService
+                        .getDefaultConfig();
 
         article.setTaskId(taskId);
         article.setTopic(request.getTopic());
         article.setStyle(style);
-        article.setPhase(ArticlePhase.CREATED.name());
-        article.setStatus(ArticleStatus.INIT.name());
 
-        int result = articleMapper.insert(article);
+        article.setModelConfig(
+                articleModelConfigService
+                        .toJson(defaultConfig)
+        );
+
+        article.setPhase(
+                ArticlePhase.CREATED.name()
+        );
+
+        article.setStatus(
+                ArticleStatus.INIT.name()
+        );
+
+        int result =
+                articleMapper.insert(article);
+
         if (result != 1) {
-            throw new RuntimeException("创建文章任务失败");
+            throw new RuntimeException(
+                    "创建文章任务失败"
+            );
         }
 
         return taskId;
     }
 
     @Override
-    public ArticleVO getByTaskId(String taskId) {
-        Article article = articleMapper.selectByTaskId(taskId);
+    public ArticleVO getByTaskId(
+            String taskId
+    ) {
+        Article article =
+                articleMapper.selectByTaskId(
+                        taskId
+                );
+
         if (article == null) {
-            throw new RuntimeException("文章任务不存在");
+            throw new RuntimeException(
+                    "文章任务不存在"
+            );
         }
-        return ArticleVO.fromEntity(article);
+
+        ArticleVO articleVO =
+                ArticleVO.fromEntity(article);
+
+        if (!StringUtils.hasText(
+                articleVO.getModelConfig()
+        )) {
+            articleVO.setModelConfig(
+                    articleModelConfigService
+                            .toJson(
+                                    articleModelConfigService
+                                            .getDefaultConfig()
+                            )
+            );
+        }
+
+        return articleVO;
+    }
+
+    @Override
+    public ArticleVO saveModelConfig(
+            SaveModelConfigRequest request
+    ) {
+        Article article =
+                articleMapper.selectByTaskId(
+                        request.getTaskId()
+                );
+
+        if (article == null) {
+            throw new RuntimeException(
+                    "文章任务不存在"
+            );
+        }
+
+        ArticleModelConfig config =
+                articleModelConfigService.normalize(
+                        request.getConfig()
+                );
+
+        String configJson =
+                articleModelConfigService.toJson(
+                        config
+                );
+
+        int result =
+                articleMapper.updateModelConfig(
+                        request.getTaskId(),
+                        request.getStyle().trim(),
+                        configJson,
+                        ArticlePhase.CREATED.name(),
+                        ArticleStatus.INIT.name()
+                );
+
+        if (result != 1) {
+            throw new RuntimeException(
+                    "保存模型配置失败"
+            );
+        }
+
+        return getByTaskId(
+                request.getTaskId()
+        );
     }
 
     @Override
@@ -144,64 +276,119 @@ public class ArticleServiceImpl implements ArticleService {
     }
 
     @Override
-    public ArticleVO generateTitles(String taskId) {
-        String prompt = null;
+    public ArticleVO generateTitles(
+            String taskId
+    ) {
+        String logInput = null;
         long start = System.currentTimeMillis();
 
         try {
-            Article article = articleMapper.selectByTaskId(taskId);
+            Article article =
+                    articleMapper.selectByTaskId(
+                            taskId
+                    );
+
             if (article == null) {
-                throw new RuntimeException("文章任务不存在");
+                throw new RuntimeException(
+                        "文章任务不存在"
+                );
             }
 
-            prompt = titleGeneratorAgent.buildPrompt(
-                    article.getTopic(),
-                    article.getStyle()
-            );
+            ArticleModelConfig config =
+                    resolveModelConfig(article);
 
-            String response = titleGeneratorAgent.callRaw(prompt);
+            LlmRequestOptions options =
+                    resolveLlmOptions(config);
 
-            List<TitleOption> titleOptions = titleGeneratorAgent.parseWithRepair(response);
+            String prompt =
+                    titleGeneratorAgent.buildPrompt(
+                            article.getTopic(),
+                            article.getStyle()
+                    );
 
-            long costMs = System.currentTimeMillis() - start;
+            logInput =
+                    buildAgentInput(
+                            config,
+                            prompt
+                    );
+
+            String response =
+                    titleGeneratorAgent.callRaw(
+                            prompt,
+                            options
+                    );
+
+            List<TitleOption> titleOptions =
+                    titleGeneratorAgent
+                            .parseWithRepair(
+                                    response
+                            );
+
+            String titleOptionsJson =
+                    objectMapper.writeValueAsString(
+                            titleOptions
+                    );
+
+            int result =
+                    articleMapper.updateTitleOptions(
+                            taskId,
+                            titleOptionsJson,
+                            ArticlePhase
+                                    .TITLE_SELECTION
+                                    .name(),
+                            ArticleStatus
+                                    .SUCCESS
+                                    .name()
+                    );
+
+            if (result != 1) {
+                throw new RuntimeException(
+                        "保存标题候选失败"
+                );
+            }
+
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
+
             agentLogService.saveSuccess(
                     taskId,
                     "TitleGeneratorAgent",
-                    prompt,
+                    logInput,
                     response,
                     costMs
             );
 
-            String titleOptionsJson = objectMapper.writeValueAsString(titleOptions);
-
-            int result = articleMapper.updateTitleOptions(
-                    taskId,
-                    titleOptionsJson,
-                    ArticlePhase.TITLE_SELECTION.name(),
-                    ArticleStatus.SUCCESS.name()
-            );
-
-            if (result != 1) {
-                throw new RuntimeException("保存标题候选失败");
-            }
-
             return getByTaskId(taskId);
+
         } catch (Exception e) {
-            long costMs = System.currentTimeMillis() - start;
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
+
             agentLogService.saveFailed(
                     taskId,
                     "TitleGeneratorAgent",
-                    prompt,
+                    logInput,
                     e.getMessage(),
                     costMs
             );
+
             articleMapper.updateFailedStatus(
                     taskId,
-                    ArticlePhase.TITLE_SELECTION.name(),
-                    ArticleStatus.FAILED.name(),
+                    ArticlePhase
+                            .TITLE_SELECTION
+                            .name(),
+                    ArticleStatus
+                            .FAILED
+                            .name(),
                     e.getMessage()
             );
-            throw new RuntimeException("生成标题失败：" + e.getMessage());
+
+            throw new RuntimeException(
+                    "生成标题失败："
+                            + e.getMessage()
+            );
         }
     }
 
@@ -235,135 +422,253 @@ public class ArticleServiceImpl implements ArticleService {
     }
 
     @Override
-    public ArticleVO confirmTitleAndGenerateOutline(ConfirmTitleRequest request) {
-        String prompt = null;
+    public ArticleVO confirmTitleAndGenerateOutline(
+            ConfirmTitleRequest request
+    ) {
+        String logInput = null;
         long start = System.currentTimeMillis();
 
         try {
-            Article article = articleMapper.selectByTaskId(request.getTaskId());
+            Article article =
+                    articleMapper.selectByTaskId(
+                            request.getTaskId()
+                    );
+
             if (article == null) {
-                throw new RuntimeException("文章任务不存在");
+                throw new RuntimeException(
+                        "文章任务不存在"
+                );
             }
 
-            prompt = outlineGeneratorAgent.buildPrompt(
-                    article.getTopic(),
-                    request.getSelectedTitle(),
-                    article.getStyle()
-            );
+            ArticleModelConfig config =
+                    resolveModelConfig(article);
 
-            String response = outlineGeneratorAgent.callRaw(prompt);
+            LlmRequestOptions options =
+                    resolveLlmOptions(config);
 
-            List<OutlineItem> outline = outlineGeneratorAgent.parseWithRepair(response);
+            String prompt =
+                    outlineGeneratorAgent.buildPrompt(
+                            article.getTopic(),
+                            request.getSelectedTitle(),
+                            article.getStyle()
+                    );
 
-            long costMs = System.currentTimeMillis() - start;
+            logInput =
+                    buildAgentInput(
+                            config,
+                            prompt
+                    );
+
+            String response =
+                    outlineGeneratorAgent.callRaw(
+                            prompt,
+                            options
+                    );
+
+            List<OutlineItem> outline =
+                    outlineGeneratorAgent
+                            .parseWithRepair(
+                                    response
+                            );
+
+            String outlineJson =
+                    objectMapper.writeValueAsString(
+                            outline
+                    );
+
+            int result =
+                    articleMapper
+                            .updateSelectedTitleAndOutline(
+                                    request.getTaskId(),
+                                    request.getSelectedTitle(),
+                                    outlineJson,
+                                    ArticlePhase
+                                            .OUTLINE_EDITING
+                                            .name(),
+                                    ArticleStatus
+                                            .SUCCESS
+                                            .name()
+                            );
+
+            if (result != 1) {
+                throw new RuntimeException(
+                        "保存大纲失败"
+                );
+            }
+
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
+
             agentLogService.saveSuccess(
                     request.getTaskId(),
                     "OutlineGeneratorAgent",
-                    prompt,
+                    logInput,
                     response,
                     costMs
             );
 
-            String outlineJson = objectMapper.writeValueAsString(outline);
-
-            int result = articleMapper.updateSelectedTitleAndOutline(
-                    request.getTaskId(),
-                    request.getSelectedTitle(),
-                    outlineJson,
-                    ArticlePhase.OUTLINE_EDITING.name(),
-                    ArticleStatus.SUCCESS.name()
+            return getByTaskId(
+                    request.getTaskId()
             );
 
-            if (result != 1) {
-                throw new RuntimeException("保存大纲失败");
-            }
-
-            return getByTaskId(request.getTaskId());
         } catch (Exception e) {
-            long costMs = System.currentTimeMillis() - start;
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
+
             agentLogService.saveFailed(
                     request.getTaskId(),
                     "OutlineGeneratorAgent",
-                    prompt,
+                    logInput,
                     e.getMessage(),
                     costMs
             );
+
             articleMapper.updateFailedStatus(
                     request.getTaskId(),
-                    ArticlePhase.OUTLINE_EDITING.name(),
-                    ArticleStatus.FAILED.name(),
+                    ArticlePhase
+                            .OUTLINE_EDITING
+                            .name(),
+                    ArticleStatus
+                            .FAILED
+                            .name(),
                     e.getMessage()
             );
-            throw new RuntimeException("生成大纲失败：" + e.getMessage());
+
+            throw new RuntimeException(
+                    "生成大纲失败："
+                            + e.getMessage()
+            );
         }
     }
 
     @Override
-    public ArticleVO generateContent(String taskId) {
-        String prompt = null;
+    public ArticleVO generateContent(
+            String taskId
+    ) {
+        String logInput = null;
         long start = System.currentTimeMillis();
 
         try {
-            Article article = articleMapper.selectByTaskId(taskId);
+            Article article =
+                    articleMapper.selectByTaskId(
+                            taskId
+                    );
+
             if (article == null) {
-                throw new RuntimeException("文章任务不存在");
+                throw new RuntimeException(
+                        "文章任务不存在"
+                );
             }
 
-            if (!StringUtils.hasText(article.getSelectedTitle())) {
-                throw new RuntimeException("请先确认标题");
+            if (!StringUtils.hasText(
+                    article.getSelectedTitle()
+            )) {
+                throw new RuntimeException(
+                        "请先确认标题"
+                );
             }
 
-            if (!StringUtils.hasText(article.getOutline())) {
-                throw new RuntimeException("请先生成大纲");
+            if (!StringUtils.hasText(
+                    article.getOutline()
+            )) {
+                throw new RuntimeException(
+                        "请先生成大纲"
+                );
             }
 
-            prompt = contentGeneratorAgent.buildPrompt(
-                    article.getTopic(),
-                    article.getSelectedTitle(),
-                    article.getOutline(),
-                    article.getStyle()
-            );
+            ArticleModelConfig config =
+                    resolveModelConfig(article);
 
-            String response = contentGeneratorAgent.callRaw(prompt);
-            String content = contentGeneratorAgent.clean(response);
+            LlmRequestOptions options =
+                    resolveLlmOptions(config);
 
-            long costMs = System.currentTimeMillis() - start;
+            String prompt =
+                    contentGeneratorAgent.buildPrompt(
+                            article.getTopic(),
+                            article.getSelectedTitle(),
+                            article.getOutline(),
+                            article.getStyle()
+                    );
+
+            logInput =
+                    buildAgentInput(
+                            config,
+                            prompt
+                    );
+
+            String response =
+                    contentGeneratorAgent.callRaw(
+                            prompt,
+                            options
+                    );
+
+            String content =
+                    contentGeneratorAgent.clean(
+                            response
+                    );
+
+            int result =
+                    articleMapper.updateContent(
+                            taskId,
+                            content,
+                            ArticlePhase
+                                    .CONTENT_GENERATION
+                                    .name(),
+                            ArticleStatus
+                                    .SUCCESS
+                                    .name()
+                    );
+
+            if (result != 1) {
+                throw new RuntimeException(
+                        "保存正文失败"
+                );
+            }
+
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
+
             agentLogService.saveSuccess(
                     taskId,
                     "ContentGeneratorAgent",
-                    prompt,
+                    logInput,
                     response,
                     costMs
             );
 
-            int result = articleMapper.updateContent(
-                    taskId,
-                    content,
-                    ArticlePhase.CONTENT_GENERATION.name(),
-                    ArticleStatus.SUCCESS.name()
-            );
-
-            if (result != 1) {
-                throw new RuntimeException("保存正文失败");
-            }
-
             return getByTaskId(taskId);
+
         } catch (Exception e) {
-            long costMs = System.currentTimeMillis() - start;
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
+
             agentLogService.saveFailed(
                     taskId,
                     "ContentGeneratorAgent",
-                    prompt,
+                    logInput,
                     e.getMessage(),
                     costMs
             );
+
             articleMapper.updateFailedStatus(
                     taskId,
-                    ArticlePhase.CONTENT_GENERATION.name(),
-                    ArticleStatus.FAILED.name(),
+                    ArticlePhase
+                            .CONTENT_GENERATION
+                            .name(),
+                    ArticleStatus
+                            .FAILED
+                            .name(),
                     e.getMessage()
             );
-            throw new RuntimeException("生成正文失败：" + e.getMessage());
+
+            throw new RuntimeException(
+                    "生成正文失败："
+                            + e.getMessage()
+            );
         }
     }
 
@@ -413,6 +718,9 @@ public class ArticleServiceImpl implements ArticleService {
                 sleep(500);
 
                 Article article = articleMapper.selectByTaskId(taskId);
+                ArticleModelConfig config = resolveModelConfig(article);
+
+                LlmRequestOptions options = resolveLlmOptions(config);
                 if (article == null) {
                     throw new RuntimeException("文章任务不存在");
                 }
@@ -454,7 +762,7 @@ public class ArticleServiceImpl implements ArticleService {
 
                 long agentStart = System.currentTimeMillis();
 
-                String response = contentGeneratorAgent.callRaw(prompt);
+                String response = contentGeneratorAgent.callRaw(prompt, options);
                 String content = contentGeneratorAgent.clean(response);
 
                 long costMs = System.currentTimeMillis() - agentStart;
@@ -462,7 +770,10 @@ public class ArticleServiceImpl implements ArticleService {
                 agentLogService.saveSuccess(
                         taskId,
                         "ContentGeneratorAgent",
-                        prompt,
+                        buildAgentInput(
+                                config,
+                                prompt
+                        ),
                         response,
                         costMs
                 );
@@ -569,6 +880,9 @@ public class ArticleServiceImpl implements ArticleService {
                 ));
 
                 Article article = articleMapper.selectByTaskId(taskId);
+                ArticleModelConfig config = resolveModelConfig(article);
+
+                LlmRequestOptions options = resolveLlmOptions(config);
                 if (article == null) {
                     throw new RuntimeException("文章任务不存在");
                 }
@@ -598,7 +912,7 @@ public class ArticleServiceImpl implements ArticleService {
 
                 StringBuilder streamedContent = new StringBuilder();
 
-                String rawContent = streamingLlmClient.chatStream(prompt, chunk -> {
+                String rawContent = streamingLlmClient.chatStream(prompt, options, chunk -> {
                     try {
                         streamedContent.append(chunk);
 
@@ -634,7 +948,10 @@ public class ArticleServiceImpl implements ArticleService {
                 agentLogService.saveSuccess(
                         taskId,
                         "ContentGeneratorAgent-RealStream",
-                        prompt,
+                        buildAgentInput(
+                                config,
+                                prompt
+                        ),
                         rawContent,
                         costMs
                 );
@@ -684,99 +1001,154 @@ public class ArticleServiceImpl implements ArticleService {
     }
 
     @Override
-    public ArticleVO generateImagePrompts(String taskId) {
+    public ArticleVO generateImagePrompts(
+            String taskId
+    ) {
         long start = System.currentTimeMillis();
-        String prompt = null;
-        String response = null;
+        String logInput = null;
 
         try {
-            Article article = articleMapper.selectByTaskId(taskId);
-            if (article == null) {
-                throw new RuntimeException("文章任务不存在");
-            }
-
-            if (!StringUtils.hasText(article.getSelectedTitle())) {
-                throw new RuntimeException("请先确认标题");
-            }
-
-            if (!StringUtils.hasText(article.getContent())) {
-                throw new RuntimeException("请先生成正文");
-            }
-
-            /*
-             * 根据正文标题数量和文章长度，
-             * 自动计算本次需要多少张图片。
-             */
-            int imageCount =
-                    imagePromptAgent.calculateImageCount(
-                            article.getContent()
+            Article article =
+                    articleMapper.selectByTaskId(
+                            taskId
                     );
 
-            System.out.println(
-                    "本次计划生成图片数量："
-                            + imageCount
-            );
+            if (article == null) {
+                throw new RuntimeException(
+                        "文章任务不存在"
+                );
+            }
 
-            prompt = imagePromptAgent.buildPrompt(
-                    article.getTopic(),
-                    article.getSelectedTitle(),
-                    article.getOutline(),
-                    article.getContent(),
-                    article.getStyle(),
-                    imageCount
-            );
+            if (!StringUtils.hasText(
+                    article.getSelectedTitle()
+            )) {
+                throw new RuntimeException(
+                        "请先确认标题"
+                );
+            }
 
-            response =
-                    imagePromptAgent.callRaw(prompt);
+            if (!StringUtils.hasText(
+                    article.getContent()
+            )) {
+                throw new RuntimeException(
+                        "请先生成正文"
+                );
+            }
+
+            ArticleModelConfig config =
+                    resolveModelConfig(article);
+
+            LlmRequestOptions options =
+                    resolveLlmOptions(config);
+
+            int imageCount;
+
+            if ("CUSTOM".equals(
+                    config.getImageCountMode()
+            )) {
+                imageCount =
+                        config.getImageCount();
+            } else {
+                imageCount =
+                        imagePromptAgent
+                                .calculateImageCount(
+                                        article.getContent()
+                                );
+            }
+
+            String prompt =
+                    imagePromptAgent.buildPrompt(
+                            article.getTopic(),
+                            article.getSelectedTitle(),
+                            article.getOutline(),
+                            article.getContent(),
+                            article.getStyle(),
+                            imageCount
+                    );
+
+            logInput =
+                    buildAgentInput(
+                            config,
+                            prompt
+                    );
+
+            String response =
+                    imagePromptAgent.callRaw(
+                            prompt,
+                            options
+                    );
 
             List<ImagePromptOption> imagePrompts =
                     imagePromptAgent.parse(
                             response,
                             imageCount
                     );
-            String imagePromptsJson = objectMapper.writeValueAsString(imagePrompts);
 
-            int result = articleMapper.updateImagePrompts(
-                    taskId,
-                    imagePromptsJson,
-                    ArticlePhase.CONTENT_GENERATION.name(),
-                    ArticleStatus.SUCCESS.name()
-            );
+            String imagePromptsJson =
+                    objectMapper.writeValueAsString(
+                            imagePrompts
+                    );
+
+            int result =
+                    articleMapper.updateImagePrompts(
+                            taskId,
+                            imagePromptsJson,
+                            ArticlePhase
+                                    .CONTENT_GENERATION
+                                    .name(),
+                            ArticleStatus
+                                    .SUCCESS
+                                    .name()
+                    );
 
             if (result != 1) {
-                throw new RuntimeException("保存图片提示词失败");
+                throw new RuntimeException(
+                        "保存图片提示词失败"
+                );
             }
 
-            long costMs = System.currentTimeMillis() - start;
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
 
             agentLogService.saveSuccess(
                     taskId,
                     "ImagePromptAgent",
-                    prompt,
+                    logInput,
                     response,
                     costMs
             );
 
             return getByTaskId(taskId);
+
         } catch (Exception e) {
-            long costMs = System.currentTimeMillis() - start;
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
 
             agentLogService.saveFailed(
                     taskId,
                     "ImagePromptAgent",
-                    prompt,
+                    logInput,
                     e.getMessage(),
                     costMs
             );
 
             articleMapper.updateFailedStatus(
                     taskId,
-                    ArticlePhase.CONTENT_GENERATION.name(),
-                    ArticleStatus.FAILED.name(),
+                    ArticlePhase
+                            .CONTENT_GENERATION
+                            .name(),
+                    ArticleStatus
+                            .FAILED
+                            .name(),
                     e.getMessage()
             );
 
-            throw new RuntimeException("生成图片提示词失败：" + e.getMessage());
+            throw new RuntimeException(
+                    "生成图片提示词失败："
+                            + e.getMessage()
+            );
         }
     }
 
@@ -878,43 +1250,94 @@ public class ArticleServiceImpl implements ArticleService {
     }
 
     @Override
-    public ArticleVO generateImageResults(String taskId, String provider) {
+    public ArticleVO generateImageResults(
+            String taskId,
+            String provider
+    ) {
         long start = System.currentTimeMillis();
+
         String inputText = null;
         String outputText = null;
 
         try {
-            Article article = articleMapper.selectByTaskId(taskId);
+            Article article =
+                    articleMapper.selectByTaskId(
+                            taskId
+                    );
+
             if (article == null) {
-                throw new RuntimeException("文章任务不存在");
+                throw new RuntimeException(
+                        "文章任务不存在"
+                );
             }
 
-            if (!StringUtils.hasText(article.getImagePrompts())) {
-                throw new RuntimeException("请先生成配图提示词");
+            if (!StringUtils.hasText(
+                    article.getImagePrompts()
+            )) {
+                throw new RuntimeException(
+                        "请先生成配图提示词"
+                );
             }
 
-            inputText = "provider=" + provider + "\n\n" + article.getImagePrompts();
+            ArticleModelConfig config =
+                    resolveModelConfig(article);
 
-            List<ImageResultOption> imageResults = imageResultAgent.generate(
-                    article.getImagePrompts(),
-                    provider
-            );
+            String effectiveProvider =
+                    StringUtils.hasText(provider)
+                            ? provider.trim().toUpperCase()
+                            : "AUTO";
 
-            String imageResultsJson = objectMapper.writeValueAsString(imageResults);
+            if ("AUTO".equals(effectiveProvider)
+                    && !"AUTO".equals(
+                    config.getImageProvider()
+            )) {
+                effectiveProvider =
+                        config.getImageProvider();
+            }
+
+            inputText =
+                    "modelConfig="
+                            + articleModelConfigService
+                            .toJson(config)
+                            + "\n\nprovider="
+                            + effectiveProvider
+                            + "\n\n"
+                            + article.getImagePrompts();
+
+            List<ImageResultOption> imageResults =
+                    imageResultAgent.generate(
+                            article.getImagePrompts(),
+                            effectiveProvider
+                    );
+
+            String imageResultsJson =
+                    objectMapper.writeValueAsString(
+                            imageResults
+                    );
+
             outputText = imageResultsJson;
 
-            int result = articleMapper.updateImageResults(
-                    taskId,
-                    imageResultsJson,
-                    ArticlePhase.CONTENT_GENERATION.name(),
-                    ArticleStatus.SUCCESS.name()
-            );
+            int result =
+                    articleMapper.updateImageResults(
+                            taskId,
+                            imageResultsJson,
+                            ArticlePhase
+                                    .CONTENT_GENERATION
+                                    .name(),
+                            ArticleStatus
+                                    .SUCCESS
+                                    .name()
+                    );
 
             if (result != 1) {
-                throw new RuntimeException("保存图片结果失败");
+                throw new RuntimeException(
+                        "保存图片结果失败"
+                );
             }
 
-            long costMs = System.currentTimeMillis() - start;
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
 
             agentLogService.saveSuccess(
                     taskId,
@@ -925,8 +1348,11 @@ public class ArticleServiceImpl implements ArticleService {
             );
 
             return getByTaskId(taskId);
+
         } catch (Exception e) {
-            long costMs = System.currentTimeMillis() - start;
+            long costMs =
+                    System.currentTimeMillis()
+                            - start;
 
             agentLogService.saveFailed(
                     taskId,
@@ -938,12 +1364,19 @@ public class ArticleServiceImpl implements ArticleService {
 
             articleMapper.updateFailedStatus(
                     taskId,
-                    ArticlePhase.CONTENT_GENERATION.name(),
-                    ArticleStatus.FAILED.name(),
+                    ArticlePhase
+                            .CONTENT_GENERATION
+                            .name(),
+                    ArticleStatus
+                            .FAILED
+                            .name(),
                     e.getMessage()
             );
 
-            throw new RuntimeException("生成图片结果失败：" + e.getMessage());
+            throw new RuntimeException(
+                    "生成图片结果失败："
+                            + e.getMessage()
+            );
         }
     }
 

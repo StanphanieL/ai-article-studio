@@ -11,6 +11,8 @@ import java.util.List;
 
 import com.nana.aiarticlestudio.model.enums.JsonRepairType;
 
+import com.nana.aiarticlestudio.model.dto.LlmRequestOptions;
+
 @Component
 @RequiredArgsConstructor
 public class OutlineGeneratorAgent {
@@ -71,6 +73,16 @@ public class OutlineGeneratorAgent {
 
     public String callRaw(String prompt) {
         return llmClient.chat(prompt);
+    }
+
+    public String callRaw(
+            String prompt,
+            LlmRequestOptions options
+    ) {
+        return llmClient.chat(
+                prompt,
+                options
+        );
     }
 
     public List<OutlineItem> parse(String response) {

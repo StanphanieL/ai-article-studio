@@ -3,6 +3,8 @@ package com.nana.aiarticlestudio.agent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import com.nana.aiarticlestudio.model.dto.LlmRequestOptions;
+
 @Component
 @RequiredArgsConstructor
 public class ContentGeneratorAgent {
@@ -35,6 +37,16 @@ public class ContentGeneratorAgent {
 
     public String callRaw(String prompt) {
         return llmClient.chat(prompt);
+    }
+
+    public String callRaw(
+            String prompt,
+            LlmRequestOptions options
+    ) {
+        return llmClient.chat(
+                prompt,
+                options
+        );
     }
 
     public String clean(String response) {

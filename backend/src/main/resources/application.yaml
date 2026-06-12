@@ -29,6 +29,8 @@ llm:
   api-key: ${LLM_API_KEY:}
   model: MiniMax-M2.5
   timeout-seconds: 360
+  temperature: 0.7
+  max-completion-tokens: 8192
 
 app:
   backend-base-url: http://localhost:8123
@@ -48,7 +50,13 @@ app:
     batch-size: 1
     num-inference-steps: 20
     guidance-scale: 7.5
+    cfg: 4.0
     negative-prompt: low quality, blurry, distorted, deformed, watermark, text artifacts
+
+  model-config:
+    image-provider: AUTO
+    image-count-mode: AUTO
+    image-count: 5
 
 
   image:

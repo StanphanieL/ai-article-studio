@@ -1,6 +1,5 @@
 import request from './request'
 
-
 export interface BaseResponse<T> {
   code: number
   message: string
@@ -14,11 +13,21 @@ export interface PageResult<T> {
   records: T[]
 }
 
+export interface ArticleModelConfig {
+  textModel: string
+  temperature: number
+  maxCompletionTokens: number
+  imageProvider: ImageProvider
+  imageCountMode: 'AUTO' | 'CUSTOM'
+  imageCount: number
+}
+
 export interface ArticleVO {
   id: number
   taskId: string
   topic: string
   style: string
+  modelConfig?: string
   phase: string
   status: string
   titleOptions?: string
@@ -86,6 +95,12 @@ export interface SaveContentRequest {
   content: string
 }
 
+export interface SaveModelConfigRequest {
+  taskId: string
+  style: string
+  config: ArticleModelConfig
+}
+
 export interface ImagePromptOption {
   imageTitle: string
   usageScene: string
@@ -93,7 +108,11 @@ export interface ImagePromptOption {
   promptEn: string
 }
 
-export type ImageProvider = 'AUTO' | 'PEXELS' | 'SILICONFLOW' | 'GOOGLE_AI'
+export type ImageProvider =
+  | 'AUTO'
+  | 'PEXELS'
+  | 'SILICONFLOW'
+  | 'GOOGLE_AI'
 
 export interface ImageResultOption {
   imageTitle: string
@@ -107,78 +126,177 @@ export interface ImageResultOption {
   authorUrl?: string
 }
 
-export const createArticle = async (data: ArticleCreateRequest) => {
-  const res = await request.post<BaseResponse<string>>('/api/article/create', data)
+export const createArticle = async (
+  data: ArticleCreateRequest
+) => {
+  const res = await request.post<
+    BaseResponse<string>
+  >(
+    '/api/article/create',
+    data
+  )
+
   return res.data
 }
 
-export const listArticles = async (data: ArticleListRequest) => {
-  const res = await request.post<BaseResponse<PageResult<ArticleVO>>>('/api/article/list', data)
+export const listArticles = async (
+  data: ArticleListRequest
+) => {
+  const res = await request.post<
+    BaseResponse<PageResult<ArticleVO>>
+  >(
+    '/api/article/list',
+    data
+  )
+
   return res.data
 }
 
-export const getArticle = async (taskId: string) => {
-  const res = await request.get<BaseResponse<ArticleVO>>(`/api/article/${taskId}`)
+export const getArticle = async (
+  taskId: string
+) => {
+  const res = await request.get<
+    BaseResponse<ArticleVO>
+  >(
+    `/api/article/${taskId}`
+  )
+
   return res.data
 }
 
-export const deleteArticle = async (taskId: string) => {
-  const res = await request.post<BaseResponse<boolean>>(`/api/article/delete/${taskId}`)
+export const deleteArticle = async (
+  taskId: string
+) => {
+  const res = await request.post<
+    BaseResponse<boolean>
+  >(
+    `/api/article/delete/${taskId}`
+  )
+
   return res.data
 }
 
-export const generateTitles = async (taskId: string) => {
-  const res = await request.post<BaseResponse<ArticleVO>>(`/api/article/generate-titles/${taskId}`)
+export const generateTitles = async (
+  taskId: string
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    `/api/article/generate-titles/${taskId}`
+  )
+
   return res.data
 }
 
-export const confirmTitle = async (data: ConfirmTitleRequest) => {
-  const res = await request.post<BaseResponse<ArticleVO>>('/api/article/confirm-title', data)
+export const confirmTitle = async (
+  data: ConfirmTitleRequest
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    '/api/article/confirm-title',
+    data
+  )
+
   return res.data
 }
 
-export const generateContent = async (taskId: string) => {
-  const res = await request.post<BaseResponse<ArticleVO>>(`/api/article/generate-content/${taskId}`)
+export const generateContent = async (
+  taskId: string
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    `/api/article/generate-content/${taskId}`
+  )
+
   return res.data
 }
 
-export const streamGenerateContentUrl = (taskId: string) => {
+export const streamGenerateContentUrl = (
+  taskId: string
+) => {
   return `http://localhost:8123/api/article/stream-generate-content/${taskId}`
 }
 
-
-export const listAgentLogs = async (taskId: string) => {
-  const res = await request.get<BaseResponse<AgentLogVO[]>>(`/api/article/agent-logs/${taskId}`)
-  return res.data
-}
-
-
-export const realStreamGenerateContentUrl = (taskId: string) => {
+export const realStreamGenerateContentUrl = (
+  taskId: string
+) => {
   return `http://localhost:8123/api/article/real-stream-generate-content/${taskId}`
 }
 
-export const saveOutline = async (data: SaveOutlineRequest) => {
-  const res = await request.post<BaseResponse<ArticleVO>>('/api/article/save-outline', data)
+export const listAgentLogs = async (
+  taskId: string
+) => {
+  const res = await request.get<
+    BaseResponse<AgentLogVO[]>
+  >(
+    `/api/article/agent-logs/${taskId}`
+  )
+
   return res.data
 }
 
-export const saveTitle = async (data: SaveTitleRequest) => {
-  const res = await request.post<BaseResponse<ArticleVO>>('/api/article/save-title', data)
+export const saveOutline = async (
+  data: SaveOutlineRequest
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    '/api/article/save-outline',
+    data
+  )
+
   return res.data
 }
 
-export const saveContent = async (data: SaveContentRequest) => {
-  const res = await request.post<BaseResponse<ArticleVO>>('/api/article/save-content', data)
+export const saveTitle = async (
+  data: SaveTitleRequest
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    '/api/article/save-title',
+    data
+  )
+
   return res.data
 }
 
-export const generateImagePrompts = async (taskId: string) => {
-  const res = await request.post<BaseResponse<ArticleVO>>(`/api/article/generate-image-prompts/${taskId}`)
+export const saveContent = async (
+  data: SaveContentRequest
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    '/api/article/save-content',
+    data
+  )
+
   return res.data
 }
 
-export const continueWorkflow = async (taskId: string) => {
-  const res = await request.post<BaseResponse<ArticleVO>>(`/api/article/continue-workflow/${taskId}`)
+export const generateImagePrompts = async (
+  taskId: string
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    `/api/article/generate-image-prompts/${taskId}`
+  )
+
+  return res.data
+}
+
+export const continueWorkflow = async (
+  taskId: string
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    `/api/article/continue-workflow/${taskId}`
+  )
+
   return res.data
 }
 
@@ -186,7 +304,9 @@ export const generateImageResults = async (
   taskId: string,
   provider: ImageProvider = 'AUTO'
 ) => {
-  const res = await request.post<BaseResponse<ArticleVO>>(
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
     `/api/article/generate-image-results/${taskId}`,
     null,
     {
@@ -195,12 +315,10 @@ export const generateImageResults = async (
       },
     }
   )
+
   return res.data
 }
 
-/**
- * 生成最终图文稿。
- */
 export const composeArticle = async (
   taskId: string
 ) => {
@@ -208,6 +326,47 @@ export const composeArticle = async (
     BaseResponse<ArticleVO>
   >(
     `/api/article/compose/${taskId}`
+  )
+
+  return res.data
+}
+
+export const saveModelConfig = async (
+  data: SaveModelConfigRequest
+) => {
+  const res = await request.post<
+    BaseResponse<ArticleVO>
+  >(
+    '/api/article/save-model-config',
+    data
+  )
+
+  return res.data
+}
+
+export const exportArticleHtml = async (
+  taskId: string
+) => {
+  const res = await request.get<Blob>(
+    `/api/article/export-html/${taskId}`,
+    {
+      responseType: 'blob',
+      timeout: 180000,
+    }
+  )
+
+  return res.data
+}
+
+export const exportArticleZip = async (
+  taskId: string
+) => {
+  const res = await request.get<Blob>(
+    `/api/article/export-zip/${taskId}`,
+    {
+      responseType: 'blob',
+      timeout: 180000,
+    }
   )
 
   return res.data

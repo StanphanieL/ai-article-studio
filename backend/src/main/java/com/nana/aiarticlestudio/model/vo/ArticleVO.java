@@ -43,6 +43,8 @@ public class ArticleVO {
 
     private String finalMarkdown;
 
+    private String modelConfig;
+
     public static ArticleVO fromEntity(Article article) {
         if (article == null) {
             return null;

@@ -11,6 +11,8 @@ import java.util.List;
 
 import com.nana.aiarticlestudio.model.enums.JsonRepairType;
 
+import com.nana.aiarticlestudio.model.dto.LlmRequestOptions;
+
 @Component
 @RequiredArgsConstructor
 public class TitleGeneratorAgent {
@@ -74,6 +76,16 @@ public class TitleGeneratorAgent {
 
     public String callRaw(String prompt) {
         return llmClient.chat(prompt);
+    }
+
+    public String callRaw(
+            String prompt,
+            LlmRequestOptions options
+    ) {
+        return llmClient.chat(
+                prompt,
+                options
+        );
     }
 
     public List<TitleOption> parse(String response) {

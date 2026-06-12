@@ -42,4 +42,6 @@ public class Article {
     private String imageResults;
 
     private String finalMarkdown;
+
+    private String modelConfig;
 }

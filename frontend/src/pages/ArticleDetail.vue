@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { message } from 'ant-design-vue'
+import { 
+  message,
+  Modal,
+} from 'ant-design-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -14,12 +17,16 @@ import {
   listAgentLogs,
   saveTitle,
   saveContent,
+  exportArticleHtml,
+  exportArticleZip, 
   streamGenerateContentUrl,
   realStreamGenerateContentUrl,
   generateImagePrompts,
   continueWorkflow,
   generateImageResults,
   composeArticle,
+  saveModelConfig,
+  type ArticleModelConfig,
   type ImageProvider,
   type ImageResultOption,
   type ImagePromptOption,
@@ -70,6 +77,29 @@ const imageResultLoading = ref(false)
 const imageProvider = ref<ImageProvider>('AUTO')
 
 const composeLoading = ref(false)
+
+const htmlExportLoading = ref(false)
+
+const zipExportLoading = ref(false)
+
+const modelConfigSaving = ref(false)
+
+const editableStyle = ref('TECH')
+
+const createDefaultModelConfig =
+  (): ArticleModelConfig => ({
+    textModel: 'MiniMax-M2.5',
+    temperature: 0.7,
+    maxCompletionTokens: 8192,
+    imageProvider: 'AUTO',
+    imageCountMode: 'AUTO',
+    imageCount: 5,
+  })
+
+const editableModelConfig =
+  ref<ArticleModelConfig>(
+    createDefaultModelConfig()
+  )
 
 const markdown = new MarkdownIt({
   html: false,
@@ -365,6 +395,44 @@ const loadAgentLogs = async () => {
     message.error('加载 Agent 日志失败')
   } finally {
     logLoading.value = false
+  }
+}
+
+const syncModelConfigForm = (
+  articleData: ArticleVO
+) => {
+  editableStyle.value =
+    articleData.style || 'TECH'
+
+  if (!articleData.modelConfig) {
+    editableModelConfig.value =
+      createDefaultModelConfig()
+
+    imageProvider.value = 'AUTO'
+    return
+  }
+
+  try {
+    const savedConfig =
+      JSON.parse(
+        articleData.modelConfig
+      ) as Partial<ArticleModelConfig>
+
+    editableModelConfig.value = {
+      ...createDefaultModelConfig(),
+      ...savedConfig,
+    }
+
+    imageProvider.value =
+      editableModelConfig.value
+        .imageProvider
+  } catch (error) {
+    console.error(error)
+
+    editableModelConfig.value =
+      createDefaultModelConfig()
+
+    imageProvider.value = 'AUTO'
   }
 }
 
@@ -704,6 +772,7 @@ const loadArticle = async () => {
 
     article.value = res.data
     selectedTitle.value = res.data.selectedTitle || ''
+    syncModelConfigForm(res.data)
   } catch (error) {
     console.error(error)
     message.error('加载文章详情失败')
@@ -854,6 +923,79 @@ const handleGenerateImagePrompts = async () => {
   }
 }
 
+const doSaveModelConfig = async () => {
+  if (!taskId.value) {
+    return
+  }
+
+  if (!editableStyle.value.trim()) {
+    message.warning('文章风格不能为空')
+    return
+  }
+
+  modelConfigSaving.value = true
+
+  try {
+    const res = await saveModelConfig({
+      taskId: taskId.value,
+      style: editableStyle.value.trim(),
+      config: {
+        ...editableModelConfig.value,
+      },
+    })
+
+    if (res.code !== 0) {
+      message.error(res.message)
+      return
+    }
+
+    article.value = res.data
+    selectedTitle.value = ''
+    streamLogs.value = []
+    streamContent.value = ''
+
+    syncModelConfigForm(res.data)
+
+    message.success(
+      '模型参数保存成功，任务已重置'
+    )
+
+    await loadAgentLogs()
+  } catch (error) {
+    console.error(error)
+
+    message.error(
+      '保存模型参数失败'
+    )
+  } finally {
+    modelConfigSaving.value = false
+  }
+}
+
+const handleSaveModelConfig = () => {
+  Modal.confirm({
+    title: '保存配置并重置任务？',
+    content:
+      '保存后，已有标题、大纲、正文、图片和最终图文稿都会被清空。',
+    okText: '保存并重置',
+    cancelText: '取消',
+    async onOk() {
+      await doSaveModelConfig()
+    },
+  })
+}
+
+const handleResetModelConfigForm = () => {
+  editableStyle.value =
+    article.value?.style || 'TECH'
+
+  if (article.value) {
+    syncModelConfigForm(
+      article.value
+    )
+  }
+}
+
 const handleGenerateImageResults = async () => {
   if (!taskId.value) {
     return
@@ -990,6 +1132,156 @@ const handleDownloadMarkdown = () => {
   URL.revokeObjectURL(url)
 
   message.success('最终图文 Markdown 已下载')
+}
+
+const downloadBlob = (
+  blob: Blob,
+  fileName: string
+) => {
+  const url =
+    URL.createObjectURL(blob)
+
+  const link =
+    document.createElement('a')
+
+  link.href = url
+  link.download = fileName
+
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+
+  URL.revokeObjectURL(url)
+}
+
+const getExportErrorMessage = async (
+  error: unknown,
+  fallback: string
+) => {
+  const responseData =
+    (
+      error as {
+        response?: {
+          data?: unknown
+        }
+      }
+    ).response?.data
+
+  if (!(responseData instanceof Blob)) {
+    return fallback
+  }
+
+  const text =
+    await responseData.text()
+
+  if (!text) {
+    return fallback
+  }
+
+  try {
+    const result =
+      JSON.parse(text) as {
+        message?: string
+      }
+
+    return result.message || fallback
+  } catch {
+    return text
+  }
+}
+
+const handleExportHtml = async () => {
+  if (!taskId.value) {
+    return
+  }
+
+  if (!article.value?.finalMarkdown) {
+    message.warning(
+      '请先生成最终图文稿'
+    )
+    return
+  }
+
+  htmlExportLoading.value = true
+
+  try {
+    const blob =
+      await exportArticleHtml(
+        taskId.value
+      )
+
+    const title =
+      article.value.selectedTitle
+      || article.value.topic
+      || '未命名文章'
+
+    downloadBlob(
+      blob,
+      `${sanitizeFileName(title)}.html`
+    )
+
+    message.success(
+      '独立 HTML 已下载'
+    )
+  } catch (error) {
+    console.error(error)
+
+    message.error(
+      await getExportErrorMessage(
+        error,
+        '导出 HTML 失败'
+      )
+    )
+  } finally {
+    htmlExportLoading.value = false
+  }
+}
+
+const handleExportZip = async () => {
+  if (!taskId.value) {
+    return
+  }
+
+  if (!article.value?.finalMarkdown) {
+    message.warning(
+      '请先生成最终图文稿'
+    )
+    return
+  }
+
+  zipExportLoading.value = true
+
+  try {
+    const blob =
+      await exportArticleZip(
+        taskId.value
+      )
+
+    const title =
+      article.value.selectedTitle
+      || article.value.topic
+      || '未命名文章'
+
+    downloadBlob(
+      blob,
+      `${sanitizeFileName(title)}.zip`
+    )
+
+    message.success(
+      '完整文章 ZIP 已下载'
+    )
+  } catch (error) {
+    console.error(error)
+
+    message.error(
+      await getExportErrorMessage(
+        error,
+        '导出 ZIP 失败'
+      )
+    )
+  } finally {
+    zipExportLoading.value = false
+  }
 }
 
 const handleStreamGenerateContent = async () => {
@@ -1243,6 +1535,159 @@ onMounted(() => {
         </a-descriptions-item>
         
       </a-descriptions>
+    </a-card>
+
+    <a-card
+      v-if="article"
+      class="card"
+      title="模型参数配置"
+    >
+      <a-alert
+        type="warning"
+        show-icon
+        class="model-config-alert"
+        message="保存配置会重置当前任务"
+        description="已有标题、大纲、正文、图片和最终稿会被清空，Agent 日志仍会保留。"
+      />
+
+      <a-form layout="vertical">
+        <a-row :gutter="16">
+          <a-col :xs="24" :md="12">
+            <a-form-item label="文章风格">
+              <a-input
+                v-model:value="editableStyle"
+                placeholder="例如：专业科技、轻松科普、故事化"
+              />
+            </a-form-item>
+          </a-col>
+
+          <a-col :xs="24" :md="12">
+            <a-form-item label="文本模型">
+              <a-input
+                v-model:value="
+                  editableModelConfig.textModel
+                "
+                placeholder="例如 MiniMax-M2.5"
+              />
+            </a-form-item>
+          </a-col>
+
+          <a-col :xs="24" :md="12">
+            <a-form-item
+              label="Temperature"
+              :help="
+                `当前值：${editableModelConfig.temperature}`
+              "
+            >
+              <a-slider
+                v-model:value="
+                  editableModelConfig.temperature
+                "
+                :min="0"
+                :max="2"
+                :step="0.1"
+              />
+            </a-form-item>
+          </a-col>
+
+          <a-col :xs="24" :md="12">
+            <a-form-item label="最大输出 Token">
+              <a-input-number
+                v-model:value="
+                  editableModelConfig.maxCompletionTokens
+                "
+                :min="1"
+                :max="65536"
+                :step="1024"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+
+          <a-col :xs="24" :md="12">
+            <a-form-item label="默认图片来源">
+              <a-select
+                v-model:value="
+                  editableModelConfig.imageProvider
+                "
+                style="width: 100%"
+              >
+                <a-select-option value="AUTO">
+                  自动
+                </a-select-option>
+
+                <a-select-option value="PEXELS">
+                  Pexels
+                </a-select-option>
+
+                <a-select-option value="SILICONFLOW">
+                  SiliconFlow
+                </a-select-option>
+
+                <a-select-option value="GOOGLE_AI">
+                  Gemini
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+
+          <a-col :xs="24" :md="12">
+            <a-form-item label="配图数量模式">
+              <a-radio-group
+                v-model:value="
+                  editableModelConfig.imageCountMode
+                "
+                button-style="solid"
+              >
+                <a-radio-button value="AUTO">
+                  自动
+                </a-radio-button>
+
+                <a-radio-button value="CUSTOM">
+                  自定义
+                </a-radio-button>
+              </a-radio-group>
+            </a-form-item>
+          </a-col>
+
+          <a-col
+            v-if="
+              editableModelConfig.imageCountMode
+                === 'CUSTOM'
+            "
+            :xs="24"
+            :md="12"
+          >
+            <a-form-item label="配图数量">
+              <a-input-number
+                v-model:value="
+                  editableModelConfig.imageCount
+                "
+                :min="3"
+                :max="8"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-space>
+          <a-button
+            type="primary"
+            danger
+            :loading="modelConfigSaving"
+            @click="handleSaveModelConfig"
+          >
+            保存配置并重置任务
+          </a-button>
+
+          <a-button
+            @click="handleResetModelConfigForm"
+          >
+            恢复已保存配置
+          </a-button>
+        </a-space>
+      </a-form>
     </a-card>
 
     <a-card v-if="article" class="card" title="多 Agent 协作流程">
@@ -1737,40 +2182,26 @@ onMounted(() => {
       title="最终图文稿"
     >
       <template #extra>
-        <a-space>
+        <a-space wrap>
           <a-button
-            type="primary"
-            :loading="composeLoading"
-            :disabled="
-              !article?.content
-              || !article?.imageResults
-            "
-            @click="handleComposeArticle"
-          >
-            {{
-              article?.finalMarkdown
-                ? '重新生成最终图文稿'
-                : '生成最终图文稿'
-            }}
-          </a-button>
-
-          <a-button
-            :disabled="!article?.finalMarkdown"
-            @click="
-              handleCopyText(
-                article?.finalMarkdown,
-                '最终图文稿已复制'
-              )
-            "
-          >
-            复制最终图文稿
-          </a-button>
-
-          <a-button
-            :disabled="!article?.finalMarkdown"
             @click="handleDownloadMarkdown"
           >
-            下载最终 Markdown
+            下载 Markdown
+          </a-button>
+
+          <a-button
+            :loading="htmlExportLoading"
+            @click="handleExportHtml"
+          >
+            下载独立 HTML
+          </a-button>
+
+          <a-button
+            type="primary"
+            :loading="zipExportLoading"
+            @click="handleExportZip"
+          >
+            下载完整 ZIP
           </a-button>
         </a-space>
       </template>
@@ -2293,6 +2724,10 @@ onMounted(() => {
     Monaco,
     'Courier New',
     monospace;
+}
+
+.model-config-alert {
+  margin-bottom: 20px;
 }
 
 </style>
